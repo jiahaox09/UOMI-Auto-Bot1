@@ -74,7 +74,7 @@ Before running the UOMI Auto Bot, ensure you have the following:
 
 1. **Run the Script**:
    ```bash
-   python uomi_auto_bot.py
+   python index.py
    ```
 
 2. **Terminal Interface**:
