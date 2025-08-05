@@ -9,33 +9,34 @@ from dotenv import load_dotenv
 from colorama import Fore, Style, init as colorama_init
 
 colorama_init(autoreset=True)
-# 替换原有的配置加载部分（index.py 第12-16行）
 load_dotenv()
+
+# Configuration
 RPC_URL = os.getenv("RPC_URL", "https://finney.uomi.ai")
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
-CHAIN_ID = 4386  # 保持不变
+CHAIN_ID = 4386  # Provided chainId
 
-# 加载多账户（新增代码）
+# Load and parse multiple accounts from .env
 ACCOUNTS_RAW = os.getenv("ACCOUNTS", "")
 if not ACCOUNTS_RAW:
     raise ValueError("请在.env文件中配置ACCOUNTS（格式：私钥1,地址1;私钥2,地址2）")
 
-# 解析账户列表：每个账户为 (private_key, wallet_address) 元组
+# Parse accounts list: each account is a dict with private_key and wallet
 ACCOUNTS = []
 for account_str in ACCOUNTS_RAW.split(";"):
     if not account_str.strip():
         continue
-    pk, addr = account_str.split(",")
-    ACCOUNTS.append({
-        "private_key": pk.strip(),
-        "wallet": Web3.to_checksum_address(addr.strip())
-    })
+    try:
+        pk, addr = account_str.split(",")
+        ACCOUNTS.append({
+            "private_key": pk.strip(),
+            "wallet": Web3.to_checksum_address(addr.strip())
+        })
+    except ValueError:
+        raise ValueError(f"账户格式错误: {account_str}，正确格式应为'私钥,地址'")
 
 if not ACCOUNTS:
     raise ValueError("未解析到有效账户，请检查ACCOUNTS格式")
-WALLET = Web3.to_checksum_address(os.getenv("WALLET_ADDRESS"))
-w3 = Web3(Web3.HTTPProvider(RPC_URL))
-CHAIN_ID = 4386  # Provided chainId
 
 ROUTER_ADDRESS = Web3.to_checksum_address("0x197EEAd5Fe3DB82c4Cd55C5752Bc87AEdE11f230")
 TOKENS = {
@@ -73,7 +74,7 @@ BANNER = """
  ╚═════╝      ╚═════╝     ╚═╝     ╚═╝    ╚═╝
 """
 
-VERSION = "Version 1.0"
+VERSION = "Version 1.0 (Multi-Account Support)"
 CREDIT = "LETS FUCK THIS TESTNET--Created By Kazuha"
 LAST_RUN_FILE = "last_run.txt"
 
@@ -106,10 +107,29 @@ def loading_animation(message, duration=1.5):
             time.sleep(0.2)
     print(f"{Fore.GREEN + Style.BRIGHT + 'DONE'.center(terminal_width)}")
 
-def show_swap_menu():
+def select_account():
+    terminal_width = shutil.get_terminal_size().columns
+    print(f"\n{Fore.CYAN + Style.BRIGHT + '选择操作的账户'.center(terminal_width)}")
+    print(f"{Fore.BLUE + '-' * 50}".center(terminal_width))
+    for i, account in enumerate(ACCOUNTS, 1):
+        print(f"{Fore.WHITE + f'[{i}] 账户: {account["wallet"][:6]}...{account["wallet"][-4:]}'.center(terminal_width)}")
+    print(f"{Fore.WHITE + f'[{len(ACCOUNTS) + 1}] 所有账户'.center(terminal_width)}")
+    print(f"{Fore.BLUE + '-' * 50}".center(terminal_width))
+    
+    while True:
+        try:
+            choice = int(input(f"{Fore.GREEN + '>> 请选择账户 (1-{len(ACCOUNTS)+1}): '}"))
+            if 1 <= choice <= len(ACCOUNTS) + 1:
+                return choice
+            else:
+                print(f"{Fore.RED + '无效选择，请重新输入'}")
+        except ValueError:
+            print(f"{Fore.RED + '请输入数字'}")
+
+def show_swap_menu(wallet):
     terminal_width = shutil.get_terminal_size().columns
     print(f"\n{Fore.WHITE + Style.BRIGHT + 'UOMI DEX Swap Terminal'.center(terminal_width)}")
-    print(f"{Fore.CYAN + f'Wallet: {WALLET[:6]}...{WALLET[-4:]} | Time: {datetime.now().strftime("%H:%M:%S %d-%m-%Y")}'.center(terminal_width)}")
+    print(f"{Fore.CYAN + f'Wallet: {wallet[:6]}...{wallet[-4:]} | Time: {datetime.now().strftime("%H:%M:%S %d-%m-%Y")}'.center(terminal_width)}")
     print(f"{Fore.BLUE + '-' * 50}".center(terminal_width))
     print(f"{Fore.CYAN + 'Swap Options:'.center(terminal_width)}")
     for i, token in enumerate(TOKENS.keys(), 1):
@@ -123,30 +143,31 @@ def show_swap_menu():
     print(f"{Fore.WHITE + f'[{len(TOKENS) + 1}] Auto Swap All Pairs'.center(terminal_width)}")
     print(f"{Fore.BLUE + '-' * 50}".center(terminal_width))
 
-def do_swap(token_name, token_addr, is_token_to_uomi=False):
+def do_swap(token_name, token_addr, is_token_to_uomi=False, private_key=None, wallet=None):
     terminal_width = shutil.get_terminal_size().columns
     # Random amount between 0.001 and 0.004 for UOMI_TO_WUOMI, 0.01 for others
     amount = w3.to_wei(random.uniform(0.001, 0.004), "ether") if token_name == "UOMI_TO_WUOMI" else w3.to_wei(0.01, "ether")
     
     if token_name == "UOMI_TO_WUOMI":
         amount_display = w3.from_wei(amount, "ether")
-        print(f"\n{Fore.WHITE + Style.BRIGHT + f'Initiating Swap: {amount_display:.6f} UOMI → WUOMI'.center(terminal_width)}")
+        print(f"\n{Fore.YELLOW + f'账户: {wallet[:6]}...{wallet[-4:]}'.center(terminal_width)}")
+        print(f"{Fore.WHITE + Style.BRIGHT + f'Initiating Swap: {amount_display:.6f} UOMI → WUOMI'.center(terminal_width)}")
         loading_animation("Preparing Transaction")
         try:
             base_fee = w3.eth.get_block("latest").get("baseFeePerGas", w3.to_wei(1, "gwei"))
             gas_price = int(w3.to_wei(0.000000533, "gwei") * 1.5)  # 1.5x provided gasPrice
             tx = {
                 "chainId": CHAIN_ID,
-                "from": WALLET,
+                "from": wallet,
                 "to": token_addr,
                 "value": amount,
                 "data": "0xd0e30db0",  # Deposit function selector
-                "nonce": w3.eth.get_transaction_count(WALLET),
+                "nonce": w3.eth.get_transaction_count(wallet),
                 "gas": 42242,  # Provided gas limit
                 "maxFeePerGas": base_fee + w3.to_wei(2, "gwei"),
                 "maxPriorityFeePerGas": w3.to_wei(2, "gwei")
             }
-            signed = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
+            signed = w3.eth.account.sign_transaction(tx, private_key)
             txh = w3.eth.send_raw_transaction(signed.raw_transaction)
             print(f"{Fore.GREEN + f'TX SENT: https://explorer.uomi.ai/tx/{w3.to_hex(txh)}'.center(terminal_width)}")
             w3.eth.wait_for_transaction_receipt(txh)
@@ -160,7 +181,8 @@ def do_swap(token_name, token_addr, is_token_to_uomi=False):
     
     if is_token_to_uomi:
         token_symbol = token_name.split('_TO_')[0]
-        print(f"\n{Fore.WHITE + Style.BRIGHT + f'Initiating Swap: 0.01 {token_symbol} → UOMI'.center(terminal_width)}")
+        print(f"\n{Fore.YELLOW + f'账户: {wallet[:6]}...{wallet[-4:]}'.center(terminal_width)}")
+        print(f"{Fore.WHITE + Style.BRIGHT + f'Initiating Swap: 0.01 {token_symbol} → UOMI'.center(terminal_width)}")
         loading_animation("Approving Token")
         
         # Approve ERC20 token
@@ -179,13 +201,13 @@ def do_swap(token_name, token_addr, is_token_to_uomi=False):
         token_contract = w3.eth.contract(address=token_addr, abi=token_contract_abi)
         try:
             approve_tx = token_contract.functions.approve(ROUTER_ADDRESS, amount).build_transaction({
-                "from": WALLET,
-                "nonce": w3.eth.get_transaction_count(WALLET),
+                "from": wallet,
+                "nonce": w3.eth.get_transaction_count(wallet),
                 "gas": 100000,
                 "maxFeePerGas": w3.eth.get_block("latest").get("baseFeePerGas", w3.to_wei(1, "gwei")) + w3.to_wei(2, "gwei"),
                 "maxPriorityFeePerGas": w3.to_wei(2, "gwei")
             })
-            signed_approve = w3.eth.account.sign_transaction(approve_tx, PRIVATE_KEY)
+            signed_approve = w3.eth.account.sign_transaction(approve_tx, private_key)
             approve_txh = w3.eth.send_raw_transaction(signed_approve.raw_transaction)
             w3.eth.wait_for_transaction_receipt(approve_txh)
             print(f"{Fore.GREEN + f'APPROVED: https://explorer.uomi.ai/tx/{w3.to_hex(approve_txh)}'.center(terminal_width)}")
@@ -199,17 +221,18 @@ def do_swap(token_name, token_addr, is_token_to_uomi=False):
         inputs = [
             Web3.to_bytes(hexstr=Web3.to_hex(
                 Web3.solidity_keccak(['address', 'address', 'uint24', 'address', 'uint256', 'uint256', 'uint160'],
-                    [token_addr, output_token, 3000, WALLET, amount, 0, 0])
+                    [token_addr, output_token, 3000, wallet, amount, 0, 0])
             ))
         ]
         value = 0
     else:
-        print(f"\n{Fore.WHITE + Style.BRIGHT + f'Initiating Swap: 0.01 UOMI → {token_name}'.center(terminal_width)}")
+        print(f"\n{Fore.YELLOW + f'账户: {wallet[:6]}...{wallet[-4:]}'.center(terminal_width)}")
+        print(f"{Fore.WHITE + Style.BRIGHT + f'Initiating Swap: 0.01 UOMI → {token_name}'.center(terminal_width)}")
         commands = SWAP_EXACT_INPUT
         inputs = [
             Web3.to_bytes(hexstr=Web3.to_hex(
                 Web3.solidity_keccak(['address', 'address', 'uint24', 'address', 'uint256', 'uint256', 'uint160'],
-                    [TOKENS["SYN"], token_addr, 3000, WALLET, amount, 0, 0])
+                    [TOKENS["SYN"], token_addr, 3000, wallet, amount, 0, 0])
             ))
         ]
         value = amount
@@ -219,14 +242,14 @@ def do_swap(token_name, token_addr, is_token_to_uomi=False):
         base_fee = w3.eth.get_block("latest").get("baseFeePerGas", w3.to_wei(1, "gwei"))
         tx = router.functions.execute(commands, inputs).build_transaction({
             "chainId": CHAIN_ID,
-            "from": WALLET,
+            "from": wallet,
             "value": value,
-            "nonce": w3.eth.get_transaction_count(WALLET),
+            "nonce": w3.eth.get_transaction_count(wallet),
             "gas": 300000,
             "maxFeePerGas": base_fee + w3.to_wei(2, "gwei"),
             "maxPriorityFeePerGas": w3.to_wei(2, "gwei")
         })
-        signed = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
+        signed = w3.eth.account.sign_transaction(tx, private_key)
         txh = w3.eth.send_raw_transaction(signed.raw_transaction)
         print(f"{Fore.GREEN + f'TX SENT: https://explorer.uomi.ai/tx/{w3.to_hex(txh)}'.center(terminal_width)}")
         w3.eth.wait_for_transaction_receipt(txh)
@@ -236,70 +259,81 @@ def do_swap(token_name, token_addr, is_token_to_uomi=False):
 
 def main():
     terminal_width = shutil.get_terminal_size().columns
-    print(f"\n{Fore.MAGENTA + Style.BRIGHT + center_text(BANNER)}")
-    print(Fore.MAGENTA + Style.BRIGHT + VERSION.center(terminal_width))
-    print(Fore.YELLOW + Style.BRIGHT + CREDIT.center(terminal_width))
-    print(f"{Fore.CYAN + f'Last Run: {get_last_run()}'.center(terminal_width)}")
-    loading_animation("Initializing UOMI DEX Swap Terminal")
-    save_last_run()
+    print(center_text(Fore.CYAN + Style.BRIGHT + BANNER))
+    print(center_text(Fore.GREEN + Style.BRIGHT + VERSION))
+    print(center_text(Fore.YELLOW + CREDIT))
+    print(center_text(Fore.WHITE + f"Last Run: {get_last_run()}"))
+    print(center_text(Fore.BLUE + "-" * 50))
 
     while True:
-        show_swap_menu()
+        # Select account first
+        account_choice = select_account()
+        target_accounts = []
+        if account_choice == len(ACCOUNTS) + 1:
+            target_accounts = ACCOUNTS  # All accounts
+        else:
+            target_accounts = [ACCOUNTS[account_choice - 1]]  # Single account
+
+        # Show swap menu with first account's info (for display only)
+        show_swap_menu(target_accounts[0]["wallet"])
+        swap_choice = input(f"{Fore.GREEN + '>> 选择操作 (1-' + str(len(TOKENS) + 1) + '): '}")
+
+        # Parse swap choice
+        token_name = None
+        token_addr = None
+        is_token_to_uomi = False
+        auto_swap_all = False
+
         try:
-            prompt = ">> Select Option: "
-            choice_input = input(f"{Fore.CYAN + Style.BRIGHT + prompt.center(terminal_width)}")
-            token_choice = int(choice_input)
+            swap_choice_int = int(swap_choice)
+            if swap_choice_int == len(TOKENS) + 1:
+                auto_swap_all = True
+            elif 1 <= swap_choice_int <= len(TOKENS):
+                token_name = list(TOKENS.keys())[swap_choice_int - 1]
+                token_addr = TOKENS[token_name]
+                is_token_to_uomi = token_name.endswith("_TO_UOMI")
+            else:
+                print(f"{Fore.RED + '无效的选择，请重试'}")
+                continue
         except ValueError:
-            print(f"{Fore.RED + Style.BRIGHT + 'ERROR: Enter a valid number'.center(terminal_width)}")
-            time.sleep(1.5)
+            print(f"{Fore.RED + '请输入有效的数字'}")
             continue
 
-        token_list = list(TOKENS.items())
-        auto_all_option = len(TOKENS) + 1
+        # Get number of swaps
+        try:
+            num_swaps = int(input(f"{Fore.GREEN + '>> 输入执行次数: '}"))
+            if num_swaps < 1:
+                print(f"{Fore.RED + '次数必须大于0'}")
+                continue
+        except ValueError:
+            print(f"{Fore.RED + '请输入有效的数字'}")
+            continue
 
-        if token_choice == auto_all_option:
-            try:
-                prompt = ">> Number of Cycles: "
-                num_cycles = int(input(f"{Fore.CYAN + Style.BRIGHT + prompt.center(terminal_width)}"))
-                if num_cycles <= 0:
-                    raise ValueError
-            except ValueError:
-                print(f"{Fore.RED + Style.BRIGHT + 'ERROR: Enter a positive number'.center(terminal_width)}")
-                time.sleep(1.5)
-                continue
-            for cycle in range(num_cycles):
-                print(f"\n{Fore.WHITE + Style.BRIGHT + f'Cycle {cycle + 1}/{num_cycles}'.center(terminal_width)}")
-                for i, (token_name, token_addr) in enumerate(token_list):
-                    is_token_to_uomi = token_name.endswith("_TO_UOMI")
-                    pct = random.uniform(10, 15) / 100
-                    print(f"{Fore.CYAN + f'[{i + 1}] {token_name}: {pct*100:.2f}%'.center(terminal_width)}")
-                    do_swap(token_name, token_addr, is_token_to_uomi)
-                    time.sleep(1.5)
-                loading_animation("Cycle Completed")
-            print(f"{Fore.GREEN + Style.BRIGHT + 'AUTO SWAP COMPLETED'.center(terminal_width)}")
-        elif 1 <= token_choice <= len(token_list):
-            token_name, token_addr = token_list[token_choice - 1]
-            is_token_to_uomi = token_name.endswith("_TO_UOMI")
-            try:
-                prompt = ">> Number of Swaps: "
-                num_swaps = int(input(f"{Fore.CYAN + Style.BRIGHT + prompt.center(terminal_width)}"))
-                if num_swaps <= 0:
-                    raise ValueError
-            except ValueError:
-                print(f"{Fore.RED + Style.BRIGHT + 'ERROR: Enter a positive number'.center(terminal_width)}")
-                time.sleep(1.5)
-                continue
-            for i in range(num_swaps):
-                pct = random.uniform(10, 15) / 100
-                print(f"{Fore.CYAN + f'[{i + 1}/{num_swaps}] {token_name}: {pct*100:.2f}%'.center(terminal_width)}")
-                do_swap(token_name, token_addr, is_token_to_uomi)
-                time.sleep(1.5)
-            print(f"{Fore.GREEN + Style.BRIGHT + 'SWAPS COMPLETED'.center(terminal_width)}")
-        else:
-            print(f"{Fore.RED + Style.BRIGHT + 'INVALID OPTION. EXITING.'.center(terminal_width)}")
+        # Execute swaps for target accounts
+        for account in target_accounts:
+            print(f"\n{Fore.MAGENTA + Style.BRIGHT + f'===== 开始处理账户: {account["wallet"][:6]}...{account["wallet"][-4:]} ====='.center(terminal_width)}")
+            if auto_swap_all:
+                # Auto swap all pairs
+                for _ in range(num_swaps):
+                    print(f"\n{Fore.CYAN + f'===== 第 {_+1}/{num_swaps} 轮自动交换 ====='.center(terminal_width)}")
+                    for token in TOKENS:
+                        addr = TOKENS[token]
+                        to_uomi = token.endswith("_TO_UOMI")
+                        do_swap(token, addr, to_uomi, account["private_key"], account["wallet"])
+                        time.sleep(random.uniform(2, 5))
+            else:
+                # Single swap type
+                for i in range(num_swaps):
+                    print(f"\n{Fore.CYAN + f'===== 第 {i+1}/{num_swaps} 次交换 ====='.center(terminal_width)}")
+                    do_swap(token_name, token_addr, is_token_to_uomi, account["private_key"], account["wallet"])
+                    time.sleep(random.uniform(2, 5))
+
+        save_last_run()
+        print(f"\n{Fore.GREEN + Style.BRIGHT + '所有操作已完成'.center(terminal_width)}")
+        continue_choice = input(f"{Fore.GREEN + '是否继续? (y/n): '}").lower()
+        if continue_choice != 'y':
+            print(f"{Fore.CYAN + '感谢使用，再见!'}")
             break
-        print(f"{Fore.CYAN + 'Returning to Terminal'.center(terminal_width)}")
-        loading_animation("Loading Terminal")
 
 if __name__ == "__main__":
     main()
