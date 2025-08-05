@@ -9,11 +9,30 @@ from dotenv import load_dotenv
 from colorama import Fore, Style, init as colorama_init
 
 colorama_init(autoreset=True)
+# 替换原有的配置加载部分（index.py 第12-16行）
 load_dotenv()
-
-# Configuration
 RPC_URL = os.getenv("RPC_URL", "https://finney.uomi.ai")
-PRIVATE_KEY = os.getenv("PRIVATE_KEY")
+w3 = Web3(Web3.HTTPProvider(RPC_URL))
+CHAIN_ID = 4386  # 保持不变
+
+# 加载多账户（新增代码）
+ACCOUNTS_RAW = os.getenv("ACCOUNTS", "")
+if not ACCOUNTS_RAW:
+    raise ValueError("请在.env文件中配置ACCOUNTS（格式：私钥1,地址1;私钥2,地址2）")
+
+# 解析账户列表：每个账户为 (private_key, wallet_address) 元组
+ACCOUNTS = []
+for account_str in ACCOUNTS_RAW.split(";"):
+    if not account_str.strip():
+        continue
+    pk, addr = account_str.split(",")
+    ACCOUNTS.append({
+        "private_key": pk.strip(),
+        "wallet": Web3.to_checksum_address(addr.strip())
+    })
+
+if not ACCOUNTS:
+    raise ValueError("未解析到有效账户，请检查ACCOUNTS格式")
 WALLET = Web3.to_checksum_address(os.getenv("WALLET_ADDRESS"))
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
 CHAIN_ID = 4386  # Provided chainId
