@@ -112,7 +112,7 @@ def select_account():
     print(f"\n{Fore.CYAN + Style.BRIGHT + '选择操作的账户'.center(terminal_width)}")
     print(f"{Fore.BLUE + '-' * 50}".center(terminal_width))
     for i, account in enumerate(ACCOUNTS, 1):
-       print(f"{Fore.WHITE + f'[{i}] 账户: {account["wallet"][:6]}...{account["wallet"][-4:]}'.center(terminal_width)}")
+         print(f"{Fore.WHITE + f'[{i}] 账户: {account['wallet'][:6]}...{account['wallet'][-4:]}'.center(terminal_width)}")
     print(f"{Fore.WHITE + f'[{len(ACCOUNTS) + 1}] 所有账户'.center(terminal_width)}")
     print(f"{Fore.BLUE + '-' * 50}".center(terminal_width))
     
